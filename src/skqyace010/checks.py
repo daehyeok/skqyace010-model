@@ -1,7 +1,7 @@
 """Checks on the generated model and its output files.
 
-Uses only the standard library plus CadQuery, so the build and the tests share
-one implementation.
+Uses the standard library, CadQuery, and NumPy/Pillow (for the PNG check), so
+the build and the tests share one implementation.
 """
 
 from __future__ import annotations
@@ -174,3 +174,58 @@ def check_outputs(step_path: Path, stl_path: Path, n_parts: int) -> None:
     delta = step_bb.max_delta(stl_bb)
     if delta > OUTPUT_BBOX_TOL:
         raise CheckError(f"STEP and STL bounding boxes differ by {delta:.4f} mm")
+
+
+PNG_SIZE = (1200, 900)
+PNG_MIN_FOREGROUND = 0.15  # share of pixels that must differ from the background
+PNG_MIN_COLOUR_PIXELS = 200  # pixels that must match each part colour
+_PNG_BG_TOL = 8  # 0..255, per channel
+_PNG_COLOUR_TOL = 0.04  # 0..1, distance from the shaded colour line
+_PNG_SHADE_RANGE = (0.3, 1.05)  # brightness factors a lit face can have
+
+
+def check_png(
+    path: Path,
+    colours,
+    background: tuple[int, int, int],
+) -> None:
+    """Raises CheckError unless the PNG is a usable render of the model.
+
+    Args:
+      path: the PNG.
+      colours: base part colours as (r, g, b) in 0..1.
+      background: background colour as (r, g, b) in 0..255.
+
+    The image must be ``PNG_SIZE``, at least ``PNG_MIN_FOREGROUND`` of its pixels
+    must differ from ``background``, and every colour in ``colours`` must appear
+    at some shading level: a pixel ``p`` matches colour ``c`` when ``p ~ s * c``
+    for a brightness ``s`` in ``_PNG_SHADE_RANGE``.
+    """
+    import numpy as np
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            size = im.size
+            px = np.asarray(im.convert("RGB"), dtype=float)
+    except OSError as e:
+        raise CheckError(f"PNG cannot be read: {e}") from e
+    if size != PNG_SIZE:
+        raise CheckError(f"PNG is {size[0]} x {size[1]}, expected {PNG_SIZE[0]} x {PNG_SIZE[1]}")
+
+    flat = px.reshape(-1, 3)
+    fg = np.abs(flat - np.array(background, dtype=float)).max(axis=1) > _PNG_BG_TOL
+    share = fg.mean()
+    if share < PNG_MIN_FOREGROUND:
+        raise CheckError(f"PNG is nearly blank: {share:.1%} foreground pixels")
+
+    p = flat[fg] / 255.0
+    for c in colours:
+        c = np.asarray(c, dtype=float)
+        s = p @ c / (c @ c)
+        resid = np.linalg.norm(p - s[:, None] * c[None, :], axis=1)
+        lo, hi = _PNG_SHADE_RANGE
+        n = int(((resid < _PNG_COLOUR_TOL) & (s >= lo) & (s <= hi)).sum())
+        if n < PNG_MIN_COLOUR_PIXELS:
+            rgb = ", ".join(f"{v:.2f}" for v in c)
+            raise CheckError(f"PNG has only {n} pixels of part colour ({rgb})")

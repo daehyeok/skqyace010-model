@@ -1,4 +1,4 @@
-"""Build command: regenerate models/SKQYACE010.step and .stl from the model.
+"""Build command: regenerate models/SKQYACE010.step, .stl and .png from the model.
 
 Run with ``uv run build-model``. Outputs are written to a temporary directory,
 checked, and only then moved into place, so a failed build never touches the
@@ -19,6 +19,7 @@ import cadquery as cq
 
 from skqyace010 import checks
 from skqyace010 import model
+from skqyace010 import render
 
 BASENAME = "SKQYACE010"
 STL_TOLERANCE = 0.01  # mm, linear deflection
@@ -139,11 +140,11 @@ def normalize_stl(path: Path) -> None:
     path.write_bytes(bytes(data))
 
 
-def export(out_dir: Path) -> tuple[Path, Path]:
-    """Builds, checks and writes the STEP and STL into ``out_dir``.
+def export(out_dir: Path) -> tuple[Path, Path, Path]:
+    """Builds, checks and writes the STEP, STL and PNG render into ``out_dir``.
 
     Returns:
-      The (step, stl) paths.
+      The (step, stl, png) paths.
 
     Raises:
       checks.CheckError: if the model or an output fails a check. ``out_dir``
@@ -153,13 +154,15 @@ def export(out_dir: Path) -> tuple[Path, Path]:
     checks.check_parts(parts)
     checks.check_cover(parts)
     fused = model.fused()
-    checks.check_envelope(checks.BBox.of_shape(fused.val()), "model")
+    bbox = checks.BBox.of_shape(fused.val())
+    checks.check_envelope(bbox, "model")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=".build-", dir=out_dir))
     try:
         step = tmp / f"{BASENAME}.step"
         stl = tmp / f"{BASENAME}.stl"
+        png = tmp / f"{BASENAME}.png"
         model.assembly().export(str(step), exportType="STEP")
         normalize_step(step)
         cq.exporters.export(
@@ -172,12 +175,19 @@ def export(out_dir: Path) -> tuple[Path, Path]:
         )
         normalize_stl(stl)
         checks.check_outputs(step, stl, n_parts=len(parts))
+        render.render_png(parts, model.PART_COLORS, png, bbox)
+        checks.check_png(
+            png,
+            sorted({c.toTuple()[:3] for c in model.PART_COLORS.values()}),
+            render.BACKGROUND_RGB,
+        )
 
-        final_step = out_dir / step.name
-        final_stl = out_dir / stl.name
-        os.replace(step, final_step)
-        os.replace(stl, final_stl)
-        return final_step, final_stl
+        finals = []
+        for path in (step, stl, png):
+            final = out_dir / path.name
+            os.replace(path, final)
+            finals.append(final)
+        return tuple(finals)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -192,15 +202,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        step, stl = export(args.out_dir)
+        outputs = export(args.out_dir)
     except checks.CheckError as e:
         print(f"build-model: FAILED: {e}", file=sys.stderr)
         return 1
     except Exception as e:  # CadQuery/OCCT errors: report, keep outputs.
         print(f"build-model: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
-    print(step)
-    print(stl)
+    for path in outputs:
+        print(path)
     return 0
 
 
