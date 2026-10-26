@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "parametric-3d-printing": {
+      "source": "flowful-ai/cad-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "b881ffc37b0d41a1520b87c571545f0ca3bfa6e92845a70f288937513971abf4"
+    }
+  }
+}

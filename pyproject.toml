@@ -1,0 +1,29 @@
+[project]
+name = "skqyace010"
+version = "0.1.0"
+description = "Licence-clean 3D model (STEP/STL) of the Alps Alpine SKQYACE010 TACT switch, drawn from the datasheet with CadQuery"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "cadquery>=2.5",
+]
+
+[project.scripts]
+build-model = "skqyace010.build:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skqyace010"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
